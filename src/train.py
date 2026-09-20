@@ -63,20 +63,7 @@ def make_optimizer(model: nn.Module, lr: float) -> torch.optim.Optimizer:
 
 
 def run_epoch(model, loader, criterion, optimizer, device, train: bool):
-    if freeze_epochs > 0:
-        set_backbone_trainable(model, trainable=False)
-    else:
-        set_backbone_trainable(model, trainable=True)
-    optimizer = make_optimizer(model, lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(epochs, 1))
-
-    history = []
-    best_f1 = -1.0
-    best_state = None
-    for epoch in range(1, epochs + 1):
-        if freeze_epochs > 0 and epoch == freeze_epochs + 1:
-            set_backbone_trainable(model, trainable=True)
-            optimizer = make_optimizer(model, lr)
+    model.train(train)
     losses = []
     y_true, y_pred = [], []
     context = torch.enable_grad() if train else torch.no_grad()
@@ -132,7 +119,10 @@ def train(
     train_loader, val_loader, train_df, val_df = create_dataloaders()
     model = build_model().to(device)
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
-    set_backbone_trainable(model, trainable=False)
+    if freeze_epochs > 0:
+        set_backbone_trainable(model, trainable=False)
+    else:
+        set_backbone_trainable(model, trainable=True)
     optimizer = make_optimizer(model, lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(epochs, 1))
 

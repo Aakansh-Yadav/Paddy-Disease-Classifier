@@ -198,3 +198,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # Hugging Face streaming can abort on interpreter shutdown after a good run.
+    import os
+
+    os._exit(0)
