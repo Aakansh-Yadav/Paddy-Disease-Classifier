@@ -1,0 +1,110 @@
+# Paddy disease classification
+
+A computer-vision project that classifies a rice (paddy) leaf photograph into **one of ten labels**: nine diseases plus a healthy leaf. It follows the [Paddy Doctor](https://www.kaggle.com/competitions/paddy-disease-classification) dataset layout (`train.csv` + `train_images/<label>/*.jpg`).
+
+This README is the project roadmap. The Streamlit app repeats the same steps on the **Roadmap** page.
+
+## Roadmap
+
+1. **Problem definition**  
+   Input: a close-up photo of a paddy leaf. Output: a class name and confidence. Classes are `bacterial_leaf_blight`, `bacterial_leaf_streak`, `bacterial_panicle_blight`, `blast`, `brown_spot`, `dead_heart`, `downy_mildew`, `hispa`, `normal`, `tungro`.
+
+2. **Dataset intake**  
+   Expected folder (the one on your machine at `Downloads/paddy-disease-classification`):
+
+   ```
+   paddy-disease-classification/
+     train.csv          # image_id, label, variety, age
+     train_images/
+       blast/*.jpg
+       hispa/*.jpg
+       ...
+     test_images/       # optional unlabeled photos
+   ```
+
+   Point the trainer at it:
+
+   ```bash
+   export PADDY_DATA_DIR="/path/to/paddy-disease-classification"
+   ```
+
+   In this cloud workspace that Windows path is not visible, so `python -m src.prepare_data` downloads a public Hugging Face subset into `data/paddy-disease-classification`. If the download is blocked, it writes synthetic demo images so the pipeline still runs.
+
+3. **Exploratory data analysis**  
+   `python -m src.eda` (also runs at the start of training) writes class counts and a sample grid to `reports/`. Use these plots to confirm imbalance and image quality before modeling.
+
+4. **Preprocessing and augmentation**  
+   Every image is resized to 224×224 and normalized with ImageNet mean/std. Training-only transforms: random crop, horizontal flip, small rotation, color jitter.
+
+5. **Train / validation split**  
+   Stratified 80/20 split so rare classes (for example bacterial panicle blight) still appear in validation.
+
+6. **Model choice**  
+   Fine-tune **MobileNetV3-Small** (ImageNet weights, new 10-way head). It trains on CPU in minutes on a subset and stays small enough to ship in the app.
+
+7. **Training loop**  
+   Cross-entropy loss, AdamW, cosine decay, and a **weighted sampler** so minority diseases are seen as often as majority ones. The checkpoint with the best validation **macro F1** is kept.
+
+8. **Evaluation**  
+   Accuracy, per-class precision/recall/F1, training curves, and a confusion matrix (`reports/`). Macro F1 matters more than raw accuracy because the dataset is imbalanced.
+
+9. **Inference application**  
+   Streamlit app (`app.py`): upload a leaf photo (or pick a sample) and read the predicted disease, confidence bar, cause, and field signs.
+
+10. **Full-dataset rerun**  
+    When you have the complete local Kaggle folder, set `PADDY_DATA_DIR` and train longer (for example `--epochs 15`). That is the step that turns the demo checkpoint into a field-quality model.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## Commands
+
+```bash
+# 1. Build or verify the image folder
+python -m src.prepare_data
+
+# 2. Train (EDA + fit + metrics)
+python -m src.train --epochs 8
+
+# 3. Recompute metrics on the validation split
+python -m src.evaluate
+
+# 4. Classify one file
+python -m src.predict path/to/leaf.jpg
+
+# 5. Open the app
+streamlit run app.py --server.port 48621
+```
+
+Use your full download:
+
+```bash
+set PADDY_DATA_DIR=C:\Users\Aakansh\Downloads\paddy-disease-classification
+python -m src.train --epochs 15
+```
+
+## Project layout
+
+```
+app.py                 Streamlit UI (roadmap, dataset, metrics, classify)
+src/config.py          Paths, class names, hyperparameters
+src/prepare_data.py    Local folder check or Hugging Face subset
+src/dataset.py         Dataset, stratified split, dataloaders
+src/eda.py             Class-count and sample plots
+src/model.py           MobileNetV3-Small
+src/train.py           Training loop
+src/evaluate.py        Metrics and confusion matrix
+src/predict.py         Single-image inference
+reports/               Plots and metrics.json
+models/                paddy_mobilenetv3.pt after training
+```
+
+## Notes
+
+- The demo checkpoint trained on a subset will not match a model trained on all ~10k Kaggle images. Use your Downloads folder for that.
+- This is a decision-support tool, not a replacement for a plant pathologist.

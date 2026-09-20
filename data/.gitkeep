@@ -1,0 +1,2 @@
+# Default dataset location when PADDY_DATA_DIR is unset.
+# Place train.csv and train_images/ here, or run: python -m src.prepare_data
