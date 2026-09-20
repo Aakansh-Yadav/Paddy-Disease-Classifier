@@ -1,4 +1,4 @@
-"""Streamlit app: explore the dataset and classify a paddy leaf photo."""
+"""Streamlit app: explore the dataset, inspect errors, and classify a leaf."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from src.config import (
     CLASS_DIST_PATH,
     CLASS_INFO,
     CLASSES,
+    CLASS_TO_IDX,
     CM_PATH,
+    ERRORS_PATH,
     HISTORY_PATH,
     METRICS_PATH,
     SAMPLES_PATH,
@@ -22,6 +24,7 @@ from src.config import (
     TRAIN_IMAGES,
 )
 from src.dataset import load_metadata
+from src.explain import compute_gradcam, overlay_cam
 from src.model import load_checkpoint
 from src.predict import get_device, predict_image
 
@@ -58,15 +61,15 @@ ROADMAP = [
     ),
     (
         "7. Training",
-        "AdamW, cross-entropy, class-balanced sampling, cosine learning-rate decay, and keep the epoch with the best validation macro F1.",
+        "Warm up the classifier head with a frozen backbone, then unfreeze. AdamW, label smoothing, class-balanced sampling, cosine decay, keep best validation macro F1.",
     ),
     (
         "8. Evaluation",
-        "Report accuracy, per-class precision/recall/F1, and a confusion matrix so similar diseases (blight vs streak) are visible.",
+        "Report accuracy, per-class F1, a confusion matrix, and a table of validation mistakes.",
     ),
     (
         "9. Inference app",
-        "This page: upload a leaf image, see the predicted disease, confidence, and a short field note.",
+        "Upload a leaf image, see the predicted disease, Grad-CAM overlay, confidence, and a short field note.",
     ),
     (
         "10. Full-dataset rerun",
@@ -96,9 +99,8 @@ def page_roadmap() -> None:
         st.markdown(f"**{title}**  \n{body}")
     st.info(
         "Your Windows folder `Downloads/paddy-disease-classification` is the "
-        "intended full dataset. This cloud workspace cannot see that path, so "
-        "training here uses a downloaded public subset (or synthetic images if "
-        "the download is blocked). Copy the folder next to the repo or set "
+        "intended full dataset. This workspace cannot see that path, so training "
+        "uses a public subset. Copy the folder next to the repo or set "
         "`PADDY_DATA_DIR` to train on every image."
     )
 
@@ -150,6 +152,7 @@ def page_explore() -> None:
             "class": _fmt_label(name),
             "cause": info["cause"],
             "field signs": info["signs"],
+            "suggested next step": info["action"],
         }
         for name, info in CLASS_INFO.items()
     ]
@@ -172,10 +175,11 @@ def page_metrics() -> None:
         st.warning("Train the model first: `python -m src.train`.")
         return
     metrics = json.loads(METRICS_PATH.read_text())
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Validation accuracy", f"{metrics['val_accuracy'] * 100:.1f}%")
     c2.metric("Macro F1", f"{metrics['val_macro_f1']:.3f}")
     c3.metric("Val images", metrics.get("n_val", "—"))
+    c4.metric("Mistakes", metrics.get("val_errors", "—"))
     cols = st.columns(2)
     if HISTORY_PATH.exists():
         cols[0].image(str(HISTORY_PATH), caption="Loss and accuracy by epoch")
@@ -200,46 +204,97 @@ def page_metrics() -> None:
         st.dataframe(pd.DataFrame(table), hide_index=True, use_container_width=True)
 
 
+def page_errors() -> None:
+    st.title("Validation mistakes")
+    st.markdown(
+        "Images the model got wrong on the held-out split. Use this to see "
+        "which diseases are confused (for example blight vs streak)."
+    )
+    if not ERRORS_PATH.exists():
+        st.warning("No error table yet. Train or run `python -m src.evaluate`.")
+        return
+    frame = pd.read_csv(ERRORS_PATH)
+    mistakes = frame.loc[~frame["correct"]].copy()
+    c1, c2 = st.columns(2)
+    c1.metric("Checked", len(frame))
+    c2.metric("Wrong", len(mistakes))
+    if mistakes.empty:
+        st.success("No mistakes on the validation split.")
+        return
+    st.dataframe(
+        mistakes.drop(columns=["correct"]),
+        hide_index=True,
+        use_container_width=True,
+    )
+    try:
+        meta = load_metadata()
+        paths = dict(zip(meta["image_id"].astype(str), meta["path"]))
+    except Exception:
+        paths = {}
+    show = mistakes.head(8)
+    cols = st.columns(4)
+    for i, (_, row) in enumerate(show.iterrows()):
+        path = paths.get(str(row["image_id"]))
+        box = cols[i % 4]
+        if path and Path(path).exists():
+            box.image(path, use_container_width=True)
+        box.caption(
+            f"true: {_fmt_label(row['true_label'])} · "
+            f"pred: {_fmt_label(row['predicted'])}"
+        )
+
+
+def _resolve_image() -> Image.Image | None:
+    uploaded = st.file_uploader("Leaf photo", type=["jpg", "jpeg", "png"])
+    demo_paths = []
+    if TRAIN_IMAGES.exists():
+        for label in CLASSES:
+            hits = sorted((TRAIN_IMAGES / label).glob("*.jpg"))
+            if hits:
+                demo_paths.append(hits[min(5, len(hits) - 1)])
+    demo_names = ["(choose a sample)"] + [p.parent.name for p in demo_paths]
+    sample = st.selectbox("Or try a sample from the training folder", demo_names)
+    if uploaded is not None:
+        return Image.open(uploaded).convert("RGB")
+    if sample != "(choose a sample)":
+        return Image.open(demo_paths[demo_names.index(sample) - 1]).convert("RGB")
+    return None
+
+
 def page_classify() -> None:
     st.title("Classify a leaf")
     st.markdown(
         "Upload a close-up of a rice leaf. The model returns the most likely "
-        "disease and four runner-up classes."
+        "disease, a Grad-CAM map of what it attended to, and a short field note."
     )
     if not CHECKPOINT.exists():
         st.error("No trained weights yet. Run `python -m src.train`.")
         return
 
-    uploaded = st.file_uploader("Leaf photo", type=["jpg", "jpeg", "png"])
-    demo_paths = []
-    if TRAIN_IMAGES.exists():
-        for label in CLASSES:
-            hits = list((TRAIN_IMAGES / label).glob("*.jpg"))
-            if hits:
-                demo_paths.append(hits[0])
-    demo_names = ["(choose a sample)"] + [p.parent.name for p in demo_paths]
-    sample = st.selectbox("Or try a sample from the training folder", demo_names)
-
-    image = None
-    if uploaded is not None:
-        image = Image.open(uploaded).convert("RGB")
-    elif sample != "(choose a sample)":
-        image = Image.open(demo_paths[demo_names.index(sample) - 1]).convert("RGB")
-
+    image = _resolve_image()
     if image is None:
         st.info("Waiting for an image.")
         return
 
     col_img, col_out = st.columns([1, 1.2])
-    col_img.image(image, caption="Input", use_container_width=True)
     with st.spinner("Running the classifier…"):
         model, device, _payload = cached_model()
         result = predict_image(image, model=model, device=device)
+        cam = compute_gradcam(model, image, CLASS_TO_IDX[result["label"]], device)
+        heatmap = overlay_cam(image, cam)
+    col_img.image(image, caption="Input", use_container_width=True)
+    col_img.image(heatmap, caption="Where the model looked (Grad-CAM)", use_container_width=True)
     col_out.success(
         f"**{result['title']}**  \nConfidence {result['probability'] * 100:.1f}%"
     )
     col_out.markdown(f"**Cause:** {result['cause']}")
     col_out.markdown(f"**What to look for:** {result['signs']}")
+    col_out.markdown(f"**Suggested next step:** {result['action']}")
+    if result["probability"] < 0.45:
+        col_out.warning(
+            "Confidence is low. Take another photo in even light, or treat this "
+            "as a hint rather than a diagnosis."
+        )
     chart = pd.DataFrame(
         {
             "class": [_fmt_label(r["label"]) for r in result["ranking"]],
@@ -253,12 +308,13 @@ pages = {
     "Roadmap": page_roadmap,
     "Dataset": page_explore,
     "Metrics": page_metrics,
+    "Mistakes": page_errors,
     "Classify": page_classify,
 }
 
 with st.sidebar:
     st.header("Paddy Doctor")
     choice = st.radio("Page", list(pages))
-    st.caption("MobileNetV3-Small · 10 classes · ImageNet fine-tune")
+    st.caption("MobileNetV3-Small · 10 classes · Grad-CAM")
 
 pages[choice]()

@@ -1,4 +1,4 @@
-"""Train the paddy disease classifier."""
+"""Train the paddy disease classifier with a short frozen-backbone warmup."""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from tqdm import tqdm
 from src.config import (
     CHECKPOINT,
     EPOCHS,
+    FREEZE_EPOCHS,
     HISTORY_PATH,
+    LABEL_SMOOTHING,
     LEARNING_RATE,
     METRICS_PATH,
     MODELS_DIR,
@@ -27,7 +29,7 @@ from src.config import (
 )
 from src.dataset import create_dataloaders
 from src.eda import run_eda
-from src.evaluate import evaluate_loader, save_confusion_matrix
+from src.evaluate import evaluate_loader, save_confusion_matrix, save_predictions
 from src.model import build_model, save_checkpoint
 
 
@@ -46,8 +48,35 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
+def set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
+    for param in model.features.parameters():
+        param.requires_grad = trainable
+
+
+def make_optimizer(model: nn.Module, lr: float) -> torch.optim.Optimizer:
+    backbone = [p for p in model.features.parameters() if p.requires_grad]
+    head = list(model.classifier.parameters())
+    groups = [{"params": head, "lr": lr}]
+    if backbone:
+        groups.append({"params": backbone, "lr": lr * 0.2})
+    return torch.optim.AdamW(groups, weight_decay=WEIGHT_DECAY)
+
+
 def run_epoch(model, loader, criterion, optimizer, device, train: bool):
-    model.train(train)
+    if freeze_epochs > 0:
+        set_backbone_trainable(model, trainable=False)
+    else:
+        set_backbone_trainable(model, trainable=True)
+    optimizer = make_optimizer(model, lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(epochs, 1))
+
+    history = []
+    best_f1 = -1.0
+    best_state = None
+    for epoch in range(1, epochs + 1):
+        if freeze_epochs > 0 and epoch == freeze_epochs + 1:
+            set_backbone_trainable(model, trainable=True)
+            optimizer = make_optimizer(model, lr)
     losses = []
     y_true, y_pred = [], []
     context = torch.enable_grad() if train else torch.no_grad()
@@ -90,6 +119,7 @@ def plot_history(history: list[dict], path: Path = HISTORY_PATH) -> None:
 def train(
     epochs: int = EPOCHS,
     lr: float = LEARNING_RATE,
+    freeze_epochs: int = FREEZE_EPOCHS,
     skip_eda: bool = False,
 ) -> dict:
     set_seed()
@@ -101,14 +131,21 @@ def train(
     device = get_device()
     train_loader, val_loader, train_df, val_df = create_dataloaders()
     model = build_model().to(device)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
+    set_backbone_trainable(model, trainable=False)
+    optimizer = make_optimizer(model, lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(epochs, 1))
 
     history = []
     best_f1 = -1.0
     best_state = None
     for epoch in range(1, epochs + 1):
+        if freeze_epochs > 0 and epoch == freeze_epochs + 1:
+            set_backbone_trainable(model, trainable=True)
+            optimizer = make_optimizer(model, lr)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(epochs - freeze_epochs, 1)
+            )
         train_metrics = run_epoch(
             model, train_loader, criterion, optimizer, device, train=True
         )
@@ -116,8 +153,10 @@ def train(
             model, val_loader, criterion, optimizer, device, train=False
         )
         scheduler.step()
+        phase = "head" if epoch <= freeze_epochs else "full"
         row = {
             "epoch": epoch,
+            "phase": phase,
             "train_loss": train_metrics["loss"],
             "train_accuracy": train_metrics["accuracy"],
             "val_loss": val_metrics["loss"],
@@ -126,7 +165,7 @@ def train(
         }
         history.append(row)
         print(
-            f"Epoch {epoch:02d}/{epochs}  "
+            f"Epoch {epoch:02d}/{epochs} [{phase}]  "
             f"train_acc={row['train_accuracy']:.3f}  "
             f"val_acc={row['val_accuracy']:.3f}  "
             f"val_f1={row['val_macro_f1']:.3f}"
@@ -137,9 +176,11 @@ def train(
 
     if best_state is not None:
         model.load_state_dict(best_state)
+        model.to(device)
 
-    report, y_true, y_pred = evaluate_loader(model, val_loader, device)
+    report, y_true, y_pred, records = evaluate_loader(model, val_loader, device)
     save_confusion_matrix(y_true, y_pred)
+    save_predictions(records)
     plot_history(history)
     payload = {
         "val_accuracy": report["accuracy"],
@@ -147,9 +188,11 @@ def train(
         "n_train": int(len(train_df)),
         "n_val": int(len(val_df)),
         "epochs": epochs,
+        "freeze_epochs": freeze_epochs,
         "device": str(device),
         "history": history,
         "classification_report": report["per_class"],
+        "val_errors": int(sum(1 for row in records if not row["correct"])),
     }
     METRICS_PATH.write_text(json.dumps(payload, indent=2))
     save_checkpoint(model, CHECKPOINT, extra={"metrics": payload})
@@ -162,9 +205,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
+    parser.add_argument("--freeze-epochs", type=int, default=FREEZE_EPOCHS)
     parser.add_argument("--skip-eda", action="store_true")
     args = parser.parse_args()
-    train(epochs=args.epochs, lr=args.lr, skip_eda=args.skip_eda)
+    train(
+        epochs=args.epochs,
+        lr=args.lr,
+        freeze_epochs=args.freeze_epochs,
+        skip_eda=args.skip_eda,
+    )
 
 
 if __name__ == "__main__":

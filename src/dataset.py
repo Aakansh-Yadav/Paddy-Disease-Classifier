@@ -110,7 +110,7 @@ def stratified_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def _weighted_sampler(frame: pd.DataFrame) -> WeightedRandomSampler:
     counts = frame["label"].value_counts().to_dict()
-    weights = frame["label"].map(lambda y: 1.0 / counts[y]).to_numpy()
+    weights = frame["label"].map(lambda y: 1.0 / counts[y]).to_numpy().copy()
     return WeightedRandomSampler(
         weights=weights, num_samples=len(frame), replacement=True
     )
@@ -123,18 +123,25 @@ def create_dataloaders(
     train_df, val_df = stratified_split(df)
     train_ds = PaddyImageDataset(train_df, train=True)
     val_ds = PaddyImageDataset(val_df, train=False)
+    pin = False
+    try:
+        import torch
+
+        pin = torch.cuda.is_available()
+    except Exception:
+        pin = False
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         sampler=_weighted_sampler(train_df),
         num_workers=NUM_WORKERS,
-        pin_memory=True,
+        pin_memory=pin,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
         num_workers=NUM_WORKERS,
-        pin_memory=True,
+        pin_memory=pin,
     )
     return train_loader, val_loader, train_df, val_df

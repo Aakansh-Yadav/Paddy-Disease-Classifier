@@ -1,27 +1,52 @@
-"""Validation metrics and confusion matrix."""
+"""Validation metrics, confusion matrix, and per-image error table."""
 
 from __future__ import annotations
 
 import json
 
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 import torch
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 
-from src.config import CHECKPOINT, CLASSES, CM_PATH, METRICS_PATH, REPORTS_DIR
+from src.config import (
+    CHECKPOINT,
+    CLASSES,
+    CM_PATH,
+    ERRORS_PATH,
+    IDX_TO_CLASS,
+    METRICS_PATH,
+    REPORTS_DIR,
+)
 from src.dataset import create_dataloaders
 from src.model import load_checkpoint
 
 
 def evaluate_loader(model, loader, device):
     model.eval()
-    y_true, y_pred = [], []
+    y_true, y_pred, records = [], [], []
     with torch.no_grad():
-        for images, labels, _ids in loader:
+        for images, labels, ids in loader:
             logits = model(images.to(device))
+            probs = torch.softmax(logits, dim=1)
+            preds = logits.argmax(dim=1)
+            confidences, seconds = torch.topk(probs, k=2, dim=1)
             y_true.extend(labels.tolist())
-            y_pred.extend(logits.argmax(dim=1).cpu().tolist())
+            y_pred.extend(preds.cpu().tolist())
+            for i, image_id in enumerate(ids):
+                true_idx = int(labels[i])
+                pred_idx = int(preds[i].cpu())
+                records.append(
+                    {
+                        "image_id": image_id,
+                        "true_label": IDX_TO_CLASS[true_idx],
+                        "predicted": IDX_TO_CLASS[pred_idx],
+                        "confidence": float(confidences[i, 0].cpu()),
+                        "second": IDX_TO_CLASS[int(seconds[i, 1].cpu())],
+                        "correct": true_idx == pred_idx,
+                    }
+                )
     labels = list(range(len(CLASSES)))
     per_class = classification_report(
         y_true,
@@ -39,6 +64,7 @@ def evaluate_loader(model, loader, device):
         },
         y_true,
         y_pred,
+        records,
     )
 
 
@@ -62,19 +88,27 @@ def save_confusion_matrix(y_true, y_pred, path=CM_PATH) -> None:
     plt.close()
 
 
+def save_predictions(records: list[dict], path=ERRORS_PATH) -> None:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(records).to_csv(path, index=False)
+
+
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if not CHECKPOINT.exists():
         raise FileNotFoundError(f"Train a model first. Missing {CHECKPOINT}")
     model, _payload = load_checkpoint(CHECKPOINT, device)
     _train_loader, val_loader, _train_df, _val_df = create_dataloaders()
-    report, y_true, y_pred = evaluate_loader(model, val_loader, device)
+    report, y_true, y_pred, records = evaluate_loader(model, val_loader, device)
     save_confusion_matrix(y_true, y_pred)
+    save_predictions(records)
     if METRICS_PATH.exists():
         metrics = json.loads(METRICS_PATH.read_text())
     else:
         metrics = {}
-    metrics.update(report)
+    metrics["val_accuracy"] = report["accuracy"]
+    metrics["val_macro_f1"] = report["macro_f1"]
+    metrics["classification_report"] = report["per_class"]
     METRICS_PATH.write_text(json.dumps(metrics, indent=2))
     print(json.dumps({"accuracy": report["accuracy"], "macro_f1": report["macro_f1"]}, indent=2))
 

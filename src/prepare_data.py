@@ -17,22 +17,40 @@ def _write_csv(rows: list[dict]) -> None:
     pd.DataFrame(rows).to_csv(TRAIN_CSV, index=False)
 
 
-def dataset_ready() -> bool:
-    if not TRAIN_CSV.exists() or not TRAIN_IMAGES.exists():
-        return False
-    try:
-        df = pd.read_csv(TRAIN_CSV)
-    except Exception:
-        return False
-    if "image_id" not in df.columns or "label" not in df.columns:
-        return False
-    present = 0
-    for _, row in df.iterrows():
-        if (TRAIN_IMAGES / str(row["label"]) / str(row["image_id"])).exists():
-            present += 1
-        if present >= 20:
-            return True
-    return present > 0
+def _rows_from_disk() -> list[dict]:
+    rows: list[dict] = []
+    existing: dict[str, dict] = {}
+    if TRAIN_CSV.exists():
+        for row in pd.read_csv(TRAIN_CSV).to_dict(orient="records"):
+            existing[str(row.get("image_id"))] = row
+    for label in CLASSES:
+        folder = TRAIN_IMAGES / label
+        if not folder.exists():
+            continue
+        for path in sorted(folder.glob("*")):
+            if path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                continue
+            meta = existing.get(path.name, {})
+            rows.append(
+                {
+                    "image_id": path.name,
+                    "label": label,
+                    "variety": meta.get("variety", "unknown"),
+                    "age": meta.get("age", 0),
+                }
+            )
+    return rows
+
+
+def class_counts() -> dict[str, int]:
+    counts = {label: 0 for label in CLASSES}
+    for row in _rows_from_disk():
+        counts[row["label"]] += 1
+    return counts
+
+
+def dataset_ready(min_images: int = 20) -> bool:
+    return sum(class_counts().values()) >= min_images
 
 
 def download_huggingface_subset(per_class: int) -> int:
@@ -40,40 +58,54 @@ def download_huggingface_subset(per_class: int) -> int:
 
     TRAIN_IMAGES.mkdir(parents=True, exist_ok=True)
     collected: dict[str, list[dict]] = defaultdict(list)
+    for row in _rows_from_disk():
+        collected[row["label"]].append(row)
+
+    if all(len(collected[c]) >= per_class for c in CLASSES):
+        rows = [row for items in collected.values() for row in items]
+        _write_csv(rows)
+        print(f"Already have {len(rows)} images (>= {per_class} per class).")
+        return len(rows)
+
     print("Streaming Hugging Face dataset anthony2261/paddy-disease-classification ...")
     ds = load_dataset(
         "anthony2261/paddy-disease-classification",
         split="train",
         streaming=True,
     )
-    for example in ds:
-        label = example["label"]
-        if isinstance(label, int):
-            label = CLASSES[label]
-        if label not in CLASSES or len(collected[label]) >= per_class:
-            if all(len(collected[c]) >= per_class for c in CLASSES):
-                break
-            continue
-        image = example["image"]
-        if not isinstance(image, Image.Image):
-            image = Image.fromarray(image).convert("RGB")
-        else:
-            image = image.convert("RGB")
-        image_id = f"{label}_{len(collected[label]):03d}.jpg"
-        out_dir = TRAIN_IMAGES / label
-        out_dir.mkdir(parents=True, exist_ok=True)
-        image.save(out_dir / image_id, quality=90)
-        collected[label].append(
-            {
-                "image_id": image_id,
-                "label": label,
-                "variety": example.get("variety", "unknown"),
-                "age": example.get("age", 0),
-            }
-        )
-        filled = sum(len(v) for v in collected.values())
-        if filled % 20 == 0:
-            print(f"  saved {filled} images")
+    try:
+        for example in ds:
+            label = example["label"]
+            if isinstance(label, int):
+                label = CLASSES[label]
+            if label not in CLASSES or len(collected[label]) >= per_class:
+                if all(len(collected[c]) >= per_class for c in CLASSES):
+                    break
+                continue
+            image = example["image"]
+            if not isinstance(image, Image.Image):
+                image = Image.fromarray(image).convert("RGB")
+            else:
+                image = image.convert("RGB")
+            image_id = f"{label}_{len(collected[label]):03d}.jpg"
+            out_dir = TRAIN_IMAGES / label
+            out_dir.mkdir(parents=True, exist_ok=True)
+            dest = out_dir / image_id
+            if not dest.exists():
+                image.save(dest, quality=90)
+            collected[label].append(
+                {
+                    "image_id": image_id,
+                    "label": label,
+                    "variety": example.get("variety", "unknown"),
+                    "age": example.get("age", 0),
+                }
+            )
+            filled = sum(len(v) for v in collected.values())
+            if filled % 20 == 0:
+                print(f"  saved {filled} images")
+    finally:
+        del ds
 
     rows = [row for items in collected.values() for row in items]
     if not rows:
@@ -136,9 +168,10 @@ def write_synthetic_fallback(per_class: int = 24) -> int:
 
 def prepare(per_class: int, force_download: bool, synthetic: bool) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    if dataset_ready() and not force_download:
-        df = pd.read_csv(TRAIN_CSV)
-        print(f"Dataset already present: {len(df)} rows at {DATA_DIR}")
+    counts = class_counts()
+    enough = all(counts[c] >= per_class for c in CLASSES)
+    if dataset_ready() and not force_download and enough:
+        print(f"Dataset already present: {sum(counts.values())} rows at {DATA_DIR}")
         return
     if synthetic:
         write_synthetic_fallback(per_class)

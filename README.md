@@ -43,13 +43,13 @@ This README is the project roadmap. The Streamlit app repeats the same steps on 
    Fine-tune **MobileNetV3-Small** (ImageNet weights, new 10-way head). It trains on CPU in minutes on a subset and stays small enough to ship in the app.
 
 7. **Training loop**  
-   Cross-entropy loss, AdamW, cosine decay, and a **weighted sampler** so minority diseases are seen as often as majority ones. The checkpoint with the best validation **macro F1** is kept.
+   Freeze the ImageNet backbone for two epochs while the new head learns, then unfreeze at a lower backbone learning rate. Cross-entropy with label smoothing, AdamW, cosine decay, and a **weighted sampler**. The checkpoint with the best validation **macro F1** is kept.
 
 8. **Evaluation**  
-   Accuracy, per-class precision/recall/F1, training curves, and a confusion matrix (`reports/`). Macro F1 matters more than raw accuracy because the dataset is imbalanced.
+   Accuracy, per-class precision/recall/F1, training curves, a confusion matrix, and `reports/val_predictions.csv` listing every validation image (including mistakes).
 
 9. **Inference application**  
-   Streamlit app (`app.py`): upload a leaf photo (or pick a sample) and read the predicted disease, confidence bar, cause, and field signs.
+   Streamlit app (`app.py`): upload a leaf photo, see Grad-CAM (where the network looked), confidence, cause, and a suggested next step. The **Mistakes** page shows held-out errors.
 
 10. **Full-dataset rerun**  
     When you have the complete local Kaggle folder, set `PADDY_DATA_DIR` and train longer (for example `--epochs 15`). That is the step that turns the demo checkpoint into a field-quality model.
@@ -65,20 +65,26 @@ pip install -r requirements.txt
 ## Commands
 
 ```bash
-# 1. Build or verify the image folder
-python -m src.prepare_data
+# 1. Build or verify the image folder (80 images per class by default)
+python -m src.prepare_data --per-class 80
 
-# 2. Train (EDA + fit + metrics)
-python -m src.train --epochs 8
+# 2. Train (EDA + frozen-head warmup + fine-tune + metrics)
+python -m src.train --epochs 12
 
-# 3. Recompute metrics on the validation split
+# 3. Recompute metrics and the validation error table
 python -m src.evaluate
 
 # 4. Classify one file
 python -m src.predict path/to/leaf.jpg
 
-# 5. Open the app
+# 5. Classify a whole folder (test_images or a field dump)
+python -m src.batch_predict path/to/test_images -o reports/batch_predictions.csv
+
+# 6. Open the app
 streamlit run app.py --server.port 48621
+
+# 7. Unit tests
+pytest tests -q
 ```
 
 Use your full download:
@@ -91,15 +97,18 @@ python -m src.train --epochs 15
 ## Project layout
 
 ```
-app.py                 Streamlit UI (roadmap, dataset, metrics, classify)
+app.py                 Streamlit UI (roadmap, dataset, metrics, mistakes, classify)
 src/config.py          Paths, class names, hyperparameters
 src/prepare_data.py    Local folder check or Hugging Face subset
 src/dataset.py         Dataset, stratified split, dataloaders
 src/eda.py             Class-count and sample plots
 src/model.py           MobileNetV3-Small
-src/train.py           Training loop
-src/evaluate.py        Metrics and confusion matrix
+src/train.py           Two-phase training loop
+src/evaluate.py        Metrics, confusion matrix, val_predictions.csv
+src/explain.py         Grad-CAM heatmaps
 src/predict.py         Single-image inference
+src/batch_predict.py   Folder inference to CSV
+tests/                 Unit tests for classes, transforms, and model head
 reports/               Plots and metrics.json
 models/                paddy_mobilenetv3.pt after training
 ```

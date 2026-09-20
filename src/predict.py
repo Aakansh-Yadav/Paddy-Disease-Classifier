@@ -45,6 +45,7 @@ def predict_image(
             {
                 "label": name,
                 "probability": score,
+                "index": idx,
                 **CLASS_INFO[name],
             }
         )
@@ -53,8 +54,10 @@ def predict_image(
         "label": top["label"],
         "title": top["title"],
         "probability": top["probability"],
+        "index": top["index"],
         "cause": top["cause"],
         "signs": top["signs"],
+        "action": top["action"],
         "ranking": ranking,
     }
 
