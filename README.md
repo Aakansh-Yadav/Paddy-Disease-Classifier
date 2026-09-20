@@ -40,10 +40,10 @@ This README is the project roadmap. The Streamlit app repeats the same steps on 
    Stratified 80/20 split so rare classes (for example bacterial panicle blight) still appear in validation.
 
 6. **Model choice**  
-   Fine-tune **MobileNetV3-Small** (ImageNet weights, new 10-way head). It trains on CPU in minutes on a subset and stays small enough to ship in the app.
+   **MobileNetV3-Small** is the CPU baseline. **YOLO11n-cls** is the YOLO model we actually integrate (nano, ImageNet-pretrained, whole-image labels). **YOLO11s-cls** is optional if nano underfits (`python -m src.yolo_train --model yolo11s-cls`). Detection YOLO (`yolo11n.pt`, boxes) is out of scope until lesion boxes exist.
 
 7. **Training loop**  
-   Freeze the ImageNet backbone for two epochs while the new head learns, then unfreeze at a lower backbone learning rate. Cross-entropy with label smoothing, AdamW, cosine decay, and a **weighted sampler**. The checkpoint with the best validation **macro F1** is kept.
+   Freeze the ImageNet backbone for two epochs while the new head learns, then unfreeze at a lower backbone learning rate. Cross-entropy with label smoothing, AdamW, cosine decay, and a **weighted sampler**. The checkpoint with the best validation **macro F1** is kept. YOLO uses Ultralytics classify training on the **same** stratified split.
 
 8. **Evaluation**  
    Accuracy, per-class precision/recall/F1, training curves, a confusion matrix, and `reports/val_predictions.csv` listing every validation image (including mistakes).
@@ -68,14 +68,21 @@ pip install -r requirements.txt
 # 1. Build or verify the image folder (80 images per class by default)
 python -m src.prepare_data --per-class 80
 
-# 2. Train (EDA + frozen-head warmup + fine-tune + metrics)
+# 2. Train the MobileNet baseline
 python -m src.train --epochs 12
+
+# 2b. Train YOLO11n-cls on the same split (recommended YOLO)
+python -m src.yolo_train --model yolo11n-cls --epochs 12
+
+# Optional larger YOLO classifier
+# python -m src.yolo_train --model yolo11s-cls --epochs 12
 
 # 3. Recompute metrics and the validation error table
 python -m src.evaluate
 
 # 4. Classify one file
-python -m src.predict path/to/leaf.jpg
+python -m src.predict path/to/leaf.jpg --backend yolo11n-cls
+python -m src.batch_predict path/to/test_images --backend yolo11n-cls
 
 # 5. Classify a whole folder (test_images or a field dump)
 python -m src.batch_predict path/to/test_images -o reports/batch_predictions.csv
@@ -105,6 +112,8 @@ src/eda.py             Class-count and sample plots
 src/model.py           MobileNetV3-Small
 src/train.py           Two-phase training loop
 src/evaluate.py        Metrics, confusion matrix, val_predictions.csv
+src/yolo_data.py       ImageFolder export for Ultralytics
+src/yolo_train.py      YOLO11-cls training + comparison JSON
 src/explain.py         Grad-CAM heatmaps
 src/predict.py         Single-image inference
 src/batch_predict.py   Folder inference to CSV

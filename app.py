@@ -10,23 +10,19 @@ import streamlit as st
 from PIL import Image
 
 from src.config import (
-    CHECKPOINT,
     CLASS_DIST_PATH,
     CLASS_INFO,
     CLASSES,
     CLASS_TO_IDX,
-    CM_PATH,
-    ERRORS_PATH,
-    HISTORY_PATH,
-    METRICS_PATH,
+    COMPARISON_PATH,
+    MODEL_REGISTRY,
     SAMPLES_PATH,
     TRAIN_CSV,
     TRAIN_IMAGES,
 )
 from src.dataset import load_metadata
-from src.explain import compute_gradcam, overlay_cam
-from src.model import load_checkpoint
-from src.predict import get_device, predict_image
+from src.explain import maybe_heatmap
+from src.predict import available_backends, load_backend, predict_image
 
 st.set_page_config(
     page_title="Paddy Disease Classifier",
@@ -57,7 +53,7 @@ ROADMAP = [
     ),
     (
         "6. Model",
-        "Fine-tune MobileNetV3-Small. It is small enough to train on CPU and still uses ImageNet features that transfer well to leaf photos.",
+        "Fine-tune MobileNetV3-Small as the CPU baseline, then YOLO11n-cls on the same split. YOLO11s-cls is optional if you want a larger classifier. Detection YOLO is not used: this dataset has image-level labels, not lesion boxes.",
     ),
     (
         "7. Training",
@@ -79,10 +75,8 @@ ROADMAP = [
 
 
 @st.cache_resource
-def cached_model():
-    device = get_device()
-    model, payload = load_checkpoint(CHECKPOINT, device)
-    return model, device, payload
+def cached_backend(key: str):
+    return load_backend(key)
 
 
 def _fmt_label(name: str) -> str:
@@ -171,20 +165,31 @@ def page_explore() -> None:
 
 def page_metrics() -> None:
     st.title("Model performance")
-    if not METRICS_PATH.exists():
-        st.warning("Train the model first: `python -m src.train`.")
+    if COMPARISON_PATH.exists():
+        st.subheader("MobileNet vs YOLO")
+        st.dataframe(pd.read_json(COMPARISON_PATH), hide_index=True, use_container_width=True)
+        st.caption(
+            "Same stratified 80/20 split. Scores are on the current subset, not the full Kaggle set."
+        )
+    spec = MODEL_REGISTRY[st.session_state["backend"]]
+    metrics_path = spec["metrics"]
+    if not metrics_path.exists():
+        st.warning(f"No metrics for {spec['title']}. Train it first.")
         return
-    metrics = json.loads(METRICS_PATH.read_text())
+    metrics = json.loads(metrics_path.read_text())
+    st.subheader(spec["title"])
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Validation accuracy", f"{metrics['val_accuracy'] * 100:.1f}%")
     c2.metric("Macro F1", f"{metrics['val_macro_f1']:.3f}")
     c3.metric("Val images", metrics.get("n_val", "—"))
     c4.metric("Mistakes", metrics.get("val_errors", "—"))
     cols = st.columns(2)
-    if HISTORY_PATH.exists():
-        cols[0].image(str(HISTORY_PATH), caption="Loss and accuracy by epoch")
-    if CM_PATH.exists():
-        cols[1].image(str(CM_PATH), caption="Confusion matrix")
+    history = spec.get("history")
+    if history and Path(history).exists():
+        cols[0].image(str(history), caption="Loss and accuracy by epoch")
+    cm = spec.get("cm")
+    if cm and Path(cm).exists():
+        cols[1].image(str(cm), caption="Confusion matrix")
     per_class = metrics.get("classification_report", {})
     table = []
     for name in CLASSES:
@@ -205,15 +210,16 @@ def page_metrics() -> None:
 
 
 def page_errors() -> None:
-    st.title("Validation mistakes")
+    st.title(f"Validation mistakes · {MODEL_REGISTRY[st.session_state['backend']]['title']}")
     st.markdown(
         "Images the model got wrong on the held-out split. Use this to see "
         "which diseases are confused (for example blight vs streak)."
     )
-    if not ERRORS_PATH.exists():
-        st.warning("No error table yet. Train or run `python -m src.evaluate`.")
+    errors_path = MODEL_REGISTRY[st.session_state["backend"]]["errors"]
+    if not errors_path.exists():
+        st.warning("No error table yet. Train this backend first.")
         return
-    frame = pd.read_csv(ERRORS_PATH)
+    frame = pd.read_csv(errors_path)
     mistakes = frame.loc[~frame["correct"]].copy()
     c1, c2 = st.columns(2)
     c1.metric("Checked", len(frame))
@@ -261,31 +267,16 @@ def _resolve_image() -> Image.Image | None:
     return None
 
 
-def page_classify() -> None:
-    st.title("Classify a leaf")
-    st.markdown(
-        "Upload a close-up of a rice leaf. The model returns the most likely "
-        "disease, a Grad-CAM map of what it attended to, and a short field note."
-    )
-    if not CHECKPOINT.exists():
-        st.error("No trained weights yet. Run `python -m src.train`.")
-        return
-
-    image = _resolve_image()
-    if image is None:
-        st.info("Waiting for an image.")
-        return
-
-    col_img, col_out = st.columns([1, 1.2])
-    with st.spinner("Running the classifier…"):
-        model, device, _payload = cached_model()
-        result = predict_image(image, model=model, device=device)
-        cam = compute_gradcam(model, image, CLASS_TO_IDX[result["label"]], device)
-        heatmap = overlay_cam(image, cam)
-    col_img.image(image, caption="Input", use_container_width=True)
-    col_img.image(heatmap, caption="Where the model looked (Grad-CAM)", use_container_width=True)
+def _render_prediction(image: Image.Image, backend: str, col_img, col_out) -> None:
+    model, device, spec = cached_backend(backend)
+    result = predict_image(image, model=model, device=device, backend=backend)
+    heatmap = maybe_heatmap(backend, model, image, CLASS_TO_IDX[result["label"]], device)
+    col_img.image(image, caption=f"Input · {spec['title']}", use_container_width=True)
+    if heatmap is not None:
+        col_img.image(heatmap, caption="Where the model looked (Grad-CAM)", use_container_width=True)
     col_out.success(
-        f"**{result['title']}**  \nConfidence {result['probability'] * 100:.1f}%"
+        f"**{spec['title']} → {result['title']}**  \n"
+        f"Confidence {result['probability'] * 100:.1f}%"
     )
     col_out.markdown(f"**Cause:** {result['cause']}")
     col_out.markdown(f"**What to look for:** {result['signs']}")
@@ -304,6 +295,30 @@ def page_classify() -> None:
     col_out.bar_chart(chart)
 
 
+def page_classify() -> None:
+    st.title("Classify a leaf")
+    st.markdown(
+        "Upload a close-up of a rice leaf. YOLO11n-cls is the primary YOLO model; "
+        "MobileNetV3-Small stays as the baseline. Compare both on the same photo."
+    )
+    ready = available_backends()
+    if not ready:
+        st.error("No trained weights yet. Run `python -m src.train` and `python -m src.yolo_train`.")
+        return
+
+    image = _resolve_image()
+    if image is None:
+        st.info("Waiting for an image.")
+        return
+
+    backends = ready if st.session_state.get("compare") and len(ready) > 1 else [st.session_state["backend"]]
+    for backend in backends:
+        col_img, col_out = st.columns([1, 1.2])
+        with st.spinner(f"Running {MODEL_REGISTRY[backend]['title']}…"):
+            _render_prediction(image, backend, col_img, col_out)
+        st.divider()
+
+
 pages = {
     "Roadmap": page_roadmap,
     "Dataset": page_explore,
@@ -314,7 +329,26 @@ pages = {
 
 with st.sidebar:
     st.header("Paddy Doctor")
+    ready = available_backends()
+    labels = {key: MODEL_REGISTRY[key]["title"] for key in MODEL_REGISTRY}
+    if ready:
+        default = "yolo11n-cls" if "yolo11n-cls" in ready else ready[0]
+        backend = st.radio(
+            "Classifier",
+            ready,
+            index=ready.index(default),
+            format_func=lambda key: labels[key],
+        )
+        st.session_state["backend"] = backend
+        st.session_state["compare"] = st.checkbox(
+            "Compare all trained models",
+            value=len(ready) > 1,
+        )
+        st.caption(MODEL_REGISTRY[backend]["why"])
+    else:
+        st.session_state["backend"] = "mobilenet_v3_small"
+        st.session_state["compare"] = False
+        st.warning("Train a model to enable inference.")
     choice = st.radio("Page", list(pages))
-    st.caption("MobileNetV3-Small · 10 classes · Grad-CAM")
 
 pages[choice]()

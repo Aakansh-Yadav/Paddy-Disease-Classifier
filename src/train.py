@@ -186,6 +186,12 @@ def train(
     }
     METRICS_PATH.write_text(json.dumps(payload, indent=2))
     save_checkpoint(model, CHECKPOINT, extra={"metrics": payload})
+    try:
+        from src.yolo_train import write_comparison
+
+        write_comparison()
+    except Exception:
+        pass
     print(f"Saved checkpoint to {CHECKPOINT}")
     print(f"Val accuracy {payload['val_accuracy']:.3f}  macro F1 {payload['val_macro_f1']:.3f}")
     return payload

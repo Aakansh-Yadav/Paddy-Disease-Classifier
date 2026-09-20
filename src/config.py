@@ -104,11 +104,56 @@ LABEL_SMOOTHING = 0.05
 PRETRAINED = True
 BACKBONE = "mobilenet_v3_small"
 CHECKPOINT = MODELS_DIR / "paddy_mobilenetv3.pt"
+YOLO_CHECKPOINT = MODELS_DIR / "paddy_yolo11n_cls.pt"
+YOLO_PRETRAINED = "yolo11n-cls.pt"
+YOLO_DATA_DIR = ROOT / "data" / "yolo_cls"
 METRICS_PATH = REPORTS_DIR / "metrics.json"
+YOLO_METRICS_PATH = REPORTS_DIR / "yolo_metrics.json"
+COMPARISON_PATH = REPORTS_DIR / "model_comparison.json"
 CM_PATH = REPORTS_DIR / "confusion_matrix.png"
+YOLO_CM_PATH = REPORTS_DIR / "yolo_confusion_matrix.png"
 HISTORY_PATH = REPORTS_DIR / "training_history.png"
 CLASS_DIST_PATH = REPORTS_DIR / "class_distribution.png"
 SAMPLES_PATH = REPORTS_DIR / "sample_grid.png"
 ERRORS_PATH = REPORTS_DIR / "val_predictions.csv"
+YOLO_ERRORS_PATH = REPORTS_DIR / "yolo_val_predictions.csv"
 
 SUBSET_PER_CLASS = 80
+
+MODEL_REGISTRY = {
+    "mobilenet_v3_small": {
+        "title": "MobileNetV3-Small",
+        "kind": "torch",
+        "checkpoint": CHECKPOINT,
+        "metrics": METRICS_PATH,
+        "errors": ERRORS_PATH,
+        "cm": CM_PATH,
+        "history": HISTORY_PATH,
+        "gradcam": True,
+        "why": "Light CPU baseline already trained in this repo.",
+    },
+    "yolo11n-cls": {
+        "title": "YOLO11n-cls",
+        "kind": "yolo",
+        "pretrained": "yolo11n-cls.pt",
+        "checkpoint": YOLO_CHECKPOINT,
+        "metrics": YOLO_METRICS_PATH,
+        "errors": YOLO_ERRORS_PATH,
+        "cm": YOLO_CM_PATH,
+        "history": None,
+        "gradcam": True,
+        "why": "Best first YOLO add-on: ImageNet-pretrained, nano size, same whole-image labels.",
+    },
+    "yolo11s-cls": {
+        "title": "YOLO11s-cls",
+        "kind": "yolo",
+        "pretrained": "yolo11s-cls.pt",
+        "checkpoint": MODELS_DIR / "paddy_yolo11s_cls.pt",
+        "metrics": REPORTS_DIR / "yolo11s_metrics.json",
+        "errors": REPORTS_DIR / "yolo11s_val_predictions.csv",
+        "cm": REPORTS_DIR / "yolo11s_confusion_matrix.png",
+        "history": None,
+        "gradcam": True,
+        "why": "Larger YOLO classifier if nano underfits. Train with --model yolo11s-cls.",
+    },
+}
