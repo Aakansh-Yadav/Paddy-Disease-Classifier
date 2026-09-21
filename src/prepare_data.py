@@ -171,7 +171,7 @@ def _label_name(example, features=None) -> str:
     label = example["label"]
     if isinstance(label, str) and label in CLASSES:
         return label
-    if features is not None and hasattr(features.get("label"), "int2str"):
+    if features is not None and "label" in features and hasattr(features["label"], "int2str"):
         name = features["label"].int2str(int(label))
         if name in CLASSES:
             return name

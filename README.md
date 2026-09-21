@@ -65,8 +65,8 @@ pip install -r requirements.txt
 ## Commands
 
 ```bash
-# 1. Build or verify the image folder (80 images per class by default)
-python -m src.prepare_data --per-class 80
+# 1. Full train set (~10,407 images)
+python -m src.prepare_data --full
 
 # 2. Train the MobileNet baseline
 python -m src.train --epochs 12
