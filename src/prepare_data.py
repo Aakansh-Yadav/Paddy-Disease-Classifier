@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 from collections import defaultdict
 from pathlib import Path
 
@@ -166,12 +167,84 @@ def write_synthetic_fallback(per_class: int = 24) -> int:
     return len(rows)
 
 
-def prepare(per_class: int, force_download: bool, synthetic: bool) -> None:
+def _label_name(example, features=None) -> str:
+    label = example["label"]
+    if isinstance(label, str) and label in CLASSES:
+        return label
+    if features is not None and hasattr(features.get("label"), "int2str"):
+        name = features["label"].int2str(int(label))
+        if name in CLASSES:
+            return name
+    if isinstance(label, int) and 0 <= label < len(CLASSES):
+        return CLASSES[label]
+    raise ValueError(f"Unknown label: {label!r}")
+
+
+def download_huggingface_full() -> int:
+    """Download every train image from the public Paddy Doctor mirror (~10,407)."""
+    from datasets import load_dataset
+
+    if TRAIN_IMAGES.exists():
+        shutil.rmtree(TRAIN_IMAGES)
+    TRAIN_IMAGES.mkdir(parents=True, exist_ok=True)
+    for label in CLASSES:
+        (TRAIN_IMAGES / label).mkdir(parents=True, exist_ok=True)
+
+    print("Downloading full Hugging Face set anthony2261/paddy-disease-classification ...")
+    ds = load_dataset("anthony2261/paddy-disease-classification", split="train")
+    features = getattr(ds, "features", None)
+    counts: dict[str, int] = defaultdict(int)
+    rows: list[dict] = []
+    try:
+        for i, example in enumerate(ds):
+            label = _label_name(example, features)
+            image = example["image"]
+            if not isinstance(image, Image.Image):
+                image = Image.fromarray(image).convert("RGB")
+            else:
+                image = image.convert("RGB")
+            image_id = f"{label}_{counts[label]:05d}.jpg"
+            image.save(TRAIN_IMAGES / label / image_id, quality=90)
+            counts[label] += 1
+            rows.append(
+                {
+                    "image_id": image_id,
+                    "label": label,
+                    "variety": example.get("variety", "unknown"),
+                    "age": example.get("age", 0),
+                }
+            )
+            if (i + 1) % 500 == 0:
+                print(f"  saved {i + 1} images")
+    finally:
+        del ds
+
+    if len(rows) < 10000:
+        raise RuntimeError(f"Expected ~10407 images, got {len(rows)}")
+    _write_csv(rows)
+    print(f"Wrote {len(rows)} images to {TRAIN_IMAGES}")
+    print("Per class:", dict(counts))
+    return len(rows)
+
+
+def prepare(
+    per_class: int,
+    force_download: bool,
+    synthetic: bool,
+    full: bool = False,
+) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     counts = class_counts()
+    total = sum(counts.values())
+    if full:
+        if total >= 10000 and not force_download:
+            print(f"Full dataset already present: {total} rows at {DATA_DIR}")
+            return
+        download_huggingface_full()
+        return
     enough = all(counts[c] >= per_class for c in CLASSES)
     if dataset_ready() and not force_download and enough:
-        print(f"Dataset already present: {sum(counts.values())} rows at {DATA_DIR}")
+        print(f"Dataset already present: {total} rows at {DATA_DIR}")
         return
     if synthetic:
         write_synthetic_fallback(per_class)
@@ -188,12 +261,17 @@ def main() -> None:
     parser.add_argument("--per-class", type=int, default=SUBSET_PER_CLASS)
     parser.add_argument("--force-download", action="store_true")
     parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Download the entire ~10,407-image train set (not an 80-per-class subset).",
+    )
+    parser.add_argument(
         "--synthetic",
         action="store_true",
         help="Skip download and generate colored demo images.",
     )
     args = parser.parse_args()
-    prepare(args.per_class, args.force_download, args.synthetic)
+    prepare(args.per_class, args.force_download, args.synthetic, full=args.full)
 
 
 if __name__ == "__main__":

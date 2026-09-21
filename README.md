@@ -28,7 +28,7 @@ This README is the project roadmap. The Streamlit app repeats the same steps on 
    export PADDY_DATA_DIR="/path/to/paddy-disease-classification"
    ```
 
-   In this cloud workspace that Windows path is not visible, so `python -m src.prepare_data` downloads a public Hugging Face subset into `data/paddy-disease-classification`. If the download is blocked, it writes synthetic demo images so the pipeline still runs.
+   In this cloud workspace that Windows path is not visible, so `python -m src.prepare_data --full` downloads the public Hugging Face copy of all ~10,407 train images. `--per-class 80` is only a small demo sample.
 
 3. **Exploratory data analysis**  
    `python -m src.eda` (also runs at the start of training) writes class counts and a sample grid to `reports/`. Use these plots to confirm imbalance and image quality before modeling.
