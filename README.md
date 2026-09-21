@@ -52,7 +52,7 @@ This README is the project roadmap. The Streamlit app repeats the same steps on 
    Streamlit app (`app.py`): upload a leaf photo, see Grad-CAM (where the network looked), confidence, cause, and a suggested next step. The **Mistakes** page shows held-out errors.
 
 10. **Full-dataset rerun**  
-    When you have the complete local Kaggle folder, set `PADDY_DATA_DIR` and train longer (for example `--epochs 15`). That is the step that turns the demo checkpoint into a field-quality model.
+    This workspace now trains on the full Hugging Face mirror of **10,407** labeled images (`python -m src.prepare_data --full`). On your PC you can still set `PADDY_DATA_DIR` to the Downloads copy.
 
 ## Setup
 
@@ -106,7 +106,7 @@ python -m src.train --epochs 15
 ```
 app.py                 Streamlit UI (roadmap, dataset, metrics, mistakes, classify)
 src/config.py          Paths, class names, hyperparameters
-src/prepare_data.py    Local folder check or Hugging Face subset
+src/prepare_data.py    Local folder check, `--full` Hugging Face download, or subset
 src/dataset.py         Dataset, stratified split, dataloaders
 src/eda.py             Class-count and sample plots
 src/model.py           MobileNetV3-Small
@@ -122,7 +122,18 @@ reports/               Plots and metrics.json
 models/                paddy_mobilenetv3.pt after training
 ```
 
+## Current full-data results
+
+Trained here on **8,325 / 2,082** stratified train/val images (all 10,407 files):
+
+| Model | Val accuracy | Macro F1 | Val mistakes |
+| --- | --- | --- | --- |
+| MobileNetV3-Small | 89.3% | 0.891 | 222 |
+| YOLO11n-cls | 96.0% | 0.957 | 83 |
+| YOLO11s-cls | **96.6%** | **0.963** | 71 |
+
+YOLO11s-cls is the strongest of the three on this split. Scores are still a held-out validation split, not the hidden Kaggle test set.
+
 ## Notes
 
-- The demo checkpoint trained on a subset will not match a model trained on all ~10k Kaggle images. Use your Downloads folder for that.
 - This is a decision-support tool, not a replacement for a plant pathologist.
