@@ -9,7 +9,9 @@ from PIL import Image
 
 from src.config import CHECKPOINT, CLASS_INFO, CLASSES, CLASS_TO_IDX, MODEL_REGISTRY
 from src.dataset import image_transforms
+from src.input_check import assess_photo
 from src.model import load_checkpoint
+from src.twostage import split_health_and_disease
 
 
 def get_device() -> torch.device:
@@ -31,7 +33,12 @@ def ranking_from_scores(scores: dict[str, float], topk: int = 5) -> list[dict]:
     return ranking
 
 
-def pack_result(ranking: list[dict], backend: str) -> dict:
+def pack_result(
+    ranking: list[dict],
+    backend: str,
+    scores: dict[str, float],
+    image: Image.Image | None = None,
+) -> dict:
     top = ranking[0]
     return {
         "label": top["label"],
@@ -43,6 +50,8 @@ def pack_result(ranking: list[dict], backend: str) -> dict:
         "action": top["action"],
         "ranking": ranking,
         "backend": backend,
+        "two_stage": split_health_and_disease(scores),
+        "input_check": assess_photo(image, scores),
     }
 
 
@@ -57,7 +66,12 @@ def predict_torch(
         logits = model(tensor)
         probs = torch.softmax(logits, dim=1)[0]
     scores = {CLASSES[i]: float(probs[i]) for i in range(len(CLASSES))}
-    return pack_result(ranking_from_scores(scores, topk=topk), backend="mobilenet_v3_small")
+    return pack_result(
+        ranking_from_scores(scores, topk=topk),
+        backend="mobilenet_v3_small",
+        scores=scores,
+        image=image,
+    )
 
 
 def predict_yolo(image: Image.Image, model, topk: int = 5, backend: str = "yolo11n-cls") -> dict:
@@ -65,7 +79,12 @@ def predict_yolo(image: Image.Image, model, topk: int = 5, backend: str = "yolo1
     names = result.names
     probs = result.probs.data.cpu()
     scores = {names[i]: float(probs[i]) for i in range(len(probs)) if names[i] in CLASS_TO_IDX}
-    return pack_result(ranking_from_scores(scores, topk=topk), backend=backend)
+    return pack_result(
+        ranking_from_scores(scores, topk=topk),
+        backend=backend,
+        scores=scores,
+        image=image,
+    )
 
 
 def load_backend(key: str):

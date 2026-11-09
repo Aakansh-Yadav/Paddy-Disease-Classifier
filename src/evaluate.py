@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 import torch
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
+from sklearn.metrics import confusion_matrix
 
 from src.config import (
     CHECKPOINT,
@@ -20,6 +20,7 @@ from src.config import (
     REPORTS_DIR,
 )
 from src.dataset import create_dataloaders
+from src.metrics import classification_scores, payload_from_scores
 from src.model import load_checkpoint
 
 
@@ -47,20 +48,15 @@ def evaluate_loader(model, loader, device):
                         "correct": true_idx == pred_idx,
                     }
                 )
-    labels = list(range(len(CLASSES)))
-    per_class = classification_report(
-        y_true,
-        y_pred,
-        labels=labels,
-        target_names=CLASSES,
-        output_dict=True,
-        zero_division=0,
-    )
+    scores = classification_scores(y_true, y_pred)
     return (
         {
-            "accuracy": float(accuracy_score(y_true, y_pred)),
-            "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
-            "per_class": per_class,
+            "accuracy": scores["accuracy"],
+            "macro_f1": scores["f1_macro"],
+            "precision_macro": scores["precision_macro"],
+            "recall_macro": scores["recall_macro"],
+            "per_class": scores["per_class"],
+            **payload_from_scores(scores),
         },
         y_true,
         y_pred,
@@ -107,10 +103,22 @@ def main() -> None:
     else:
         metrics = {}
     metrics["val_accuracy"] = report["accuracy"]
+    metrics["val_precision"] = report["precision_macro"]
+    metrics["val_recall"] = report["recall_macro"]
     metrics["val_macro_f1"] = report["macro_f1"]
     metrics["classification_report"] = report["per_class"]
     METRICS_PATH.write_text(json.dumps(metrics, indent=2))
-    print(json.dumps({"accuracy": report["accuracy"], "macro_f1": report["macro_f1"]}, indent=2))
+    print(
+        json.dumps(
+            {
+                "accuracy": report["accuracy"],
+                "precision": report["precision_macro"],
+                "recall": report["recall_macro"],
+                "macro_f1": report["macro_f1"],
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

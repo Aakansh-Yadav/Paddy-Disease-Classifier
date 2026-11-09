@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,13 +30,7 @@ from src.dataset import create_dataloaders
 from src.eda import run_eda
 from src.evaluate import evaluate_loader, save_confusion_matrix, save_predictions
 from src.model import build_model, save_checkpoint
-
-
-def set_seed(seed: int = SEED) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+from src.seed import set_seed
 
 
 def get_device() -> torch.device:
@@ -108,15 +101,16 @@ def train(
     lr: float = LEARNING_RATE,
     freeze_epochs: int = FREEZE_EPOCHS,
     skip_eda: bool = False,
+    seed: int = SEED,
 ) -> dict:
-    set_seed()
+    set_seed(seed)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     if not skip_eda:
         run_eda()
 
     device = get_device()
-    train_loader, val_loader, train_df, val_df = create_dataloaders()
+    train_loader, val_loader, train_df, val_df = create_dataloaders(seed=seed)
     model = build_model().to(device)
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
     if freeze_epochs > 0:
@@ -174,6 +168,8 @@ def train(
     plot_history(history)
     payload = {
         "val_accuracy": report["accuracy"],
+        "val_precision": report["precision_macro"],
+        "val_recall": report["recall_macro"],
         "val_macro_f1": report["macro_f1"],
         "n_train": int(len(train_df)),
         "n_val": int(len(val_df)),
@@ -183,6 +179,7 @@ def train(
         "history": history,
         "classification_report": report["per_class"],
         "val_errors": int(sum(1 for row in records if not row["correct"])),
+        "seed": seed,
     }
     METRICS_PATH.write_text(json.dumps(payload, indent=2))
     save_checkpoint(model, CHECKPOINT, extra={"metrics": payload})
@@ -193,7 +190,12 @@ def train(
     except Exception:
         pass
     print(f"Saved checkpoint to {CHECKPOINT}")
-    print(f"Val accuracy {payload['val_accuracy']:.3f}  macro F1 {payload['val_macro_f1']:.3f}")
+    print(
+        f"Val accuracy {payload['val_accuracy']:.3f}  "
+        f"precision {payload['val_precision']:.3f}  "
+        f"recall {payload['val_recall']:.3f}  "
+        f"macro F1 {payload['val_macro_f1']:.3f}"
+    )
     return payload
 
 
@@ -203,12 +205,14 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
     parser.add_argument("--freeze-epochs", type=int, default=FREEZE_EPOCHS)
     parser.add_argument("--skip-eda", action="store_true")
+    parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()
     train(
         epochs=args.epochs,
         lr=args.lr,
         freeze_epochs=args.freeze_epochs,
         skip_eda=args.skip_eda,
+        seed=args.seed,
     )
 
 

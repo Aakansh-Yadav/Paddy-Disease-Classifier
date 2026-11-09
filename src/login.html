@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in · Paddy Doctor</title>
+  <style>
+    :root { --paper:#f6f3ea; --ink:#1c2b24; --muted:#5c6b62; --green:#1f6b45; --card:#fffdf8; --line:#ddd6c6; --sick-bg:#fdeceb; --sick:#8c3a2f; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; color:var(--ink); font-family:"Segoe UI",sans-serif; background:#c9d7b8 url("/field-bg.jpg") center 30% / cover no-repeat; }
+    .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:28px 16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:28px 24px; }
+    .eyebrow { letter-spacing:.16em; text-transform:uppercase; color:var(--green); font-size:12px; font-weight:700; margin:0 0 8px; }
+    h1 { font-family:Georgia,serif; font-weight:500; font-size:36px; line-height:1.1; margin:0 0 8px; }
+    .hint { color:var(--muted); font-size:14px; margin:0; }
+    label.field { display:block; margin-top:14px; font-size:14px; font-weight:700; }
+    label.field input { display:block; width:100%; margin-top:6px; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; background:white; color:var(--ink); }
+    label.field input:focus { outline:2px solid var(--green); border-color:transparent; }
+    .optional { font-weight:500; color:var(--muted); }
+    .stack { width:min(440px,100%); }
+    .card { width:100%; }
+    .page-links { display:flex; justify-content:center; gap:10px; margin:14px 0 0; }
+    .page-links a { color:var(--ink); font-weight:700; font-size:14px; text-decoration:none; background:rgba(255,253,248,.9); border:1px solid var(--line); border-radius:999px; padding:6px 12px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:18px; }
+    button, a.ghost { border:0; border-radius:10px; padding:10px 16px; font:inherit; cursor:pointer; }
+    button.primary { background:var(--green); color:white; }
+    a.ghost { background:white; border:1px solid var(--line); color:inherit; text-decoration:none; }
+    .error { background:var(--sick-bg); color:var(--sick); border-radius:12px; padding:12px; margin-top:14px; }
+    #login-error[hidden] { display:none; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="stack">
+    <form class="card" id="login-form" novalidate>
+      <p class="eyebrow">Paddy Doctor</p>
+      <h1>Login credentials</h1>
+      <p class="hint">Username and mobile number are required. Email is optional.</p>
+      <label class="field">Username
+        <input name="username" type="text" autocomplete="username" maxlength="40" required />
+      </label>
+      <label class="field">Email <span class="optional">(optional)</span>
+        <input name="email" type="email" autocomplete="email" maxlength="80" placeholder="name@example.com" />
+      </label>
+      <label class="field">Mobile number
+        <input name="mobile" type="tel" inputmode="tel" autocomplete="tel" maxlength="16" placeholder="10-digit mobile" required />
+      </label>
+      <p class="error" id="login-error" hidden></p>
+      <div class="row">
+        <button class="primary" type="submit">Continue</button>
+      </div>
+    </form>
+    <p class="page-links"><a href="/help">Help</a><a href="/about">About</a></p>
+    </div>
+  </main>
+  <script>
+    const LOGIN_KEY = "paddy-doctor-login";
+    const form = document.getElementById("login-form");
+    const loginError = document.getElementById("login-error");
+    function readLogin() {
+      try { return JSON.parse(localStorage.getItem(LOGIN_KEY) || "null"); }
+      catch { return null; }
+    }
+    function showLoginError(message) {
+      loginError.textContent = message;
+      loginError.hidden = false;
+    }
+    function normalizeMobile(value) {
+      let digits = value.replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+      return /^\d{10}$/.test(digits) ? digits : "";
+    }
+    const session = readLogin() || {};
+    form.username.value = session.username || "";
+    form.email.value = session.email || "";
+    form.mobile.value = session.mobile || "";
+    form.username.focus();
+    form.onsubmit = (event) => {
+      event.preventDefault();
+      const username = form.username.value.trim();
+      const email = form.email.value.trim();
+      const mobile = normalizeMobile(form.mobile.value);
+      if (username.length < 2) {
+        showLoginError("Enter a username of at least 2 characters.");
+        return;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        showLoginError("Enter a valid email, or leave it blank.");
+        return;
+      }
+      if (!mobile) {
+        showLoginError("Enter a 10-digit mobile number.");
+        return;
+      }
+      localStorage.setItem(LOGIN_KEY, JSON.stringify({ username, email, mobile }));
+      location.href = "/classify";
+    };
+  </script>
+</body>
+</html>

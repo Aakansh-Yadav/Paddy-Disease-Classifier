@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Paddy Doctor</title>
+  <style>
+    :root { --paper:#f6f3ea; --ink:#1c2b24; --muted:#5c6b62; --green:#1f6b45; --green-soft:#e5f2ea; --card:#fffdf8; --line:#ddd6c6; --warn-bg:#fff4d6; --warn-ink:#6b4e12; --sick-bg:#fdeceb; --sick:#8c3a2f; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; color:var(--ink); font-family:"Segoe UI",sans-serif; background:radial-gradient(circle at top,#e7f3df,transparent 42%),linear-gradient(180deg,#fbf8f1,#eef3e6); }
+    header, main { width:min(1080px,calc(100% - 32px)); margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:end; padding:28px 0 8px; }
+    .eyebrow { letter-spacing:.16em; text-transform:uppercase; color:var(--green); font-size:12px; font-weight:700; margin:0; }
+    h1, h2 { font-family:Georgia,serif; font-weight:500; }
+    h1 { font-size:clamp(32px,5vw,52px); line-height:1.1; margin:18px 0 8px; }
+    .lead { max-width:640px; color:var(--muted); font-size:18px; }
+    .grid { display:grid; grid-template-columns:1fr 1.1fr; gap:18px; margin:28px 0; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; }
+    h2 { margin:0 0 14px; font-size:28px; }
+    .drop { width:100%; min-height:280px; border:1px dashed #8eae96; background:#f3f8f2; border-radius:14px; display:flex; align-items:center; justify-content:center; text-align:center; padding:18px; cursor:pointer; }
+    .drop img { max-height:280px; max-width:100%; border-radius:10px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+    button { border:0; border-radius:10px; padding:10px 16px; font:inherit; cursor:pointer; }
+    button.primary { background:var(--green); color:white; }
+    button.primary:disabled { opacity:.45; cursor:default; }
+    button.ghost { background:white; border:1px solid var(--line); }
+    .hint, .foot { color:var(--muted); font-size:14px; }
+    h1, .lead { text-shadow: 0 0 10px rgba(246,243,234,.95), 0 1px 0 rgba(246,243,234,.9); }
+    .foot { display:inline-block; color:var(--ink); background:rgba(255,253,248,.86); border-radius:8px; padding:6px 10px; text-shadow:none; }
+    .badge { float:right; background:var(--green-soft); color:var(--green); border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; }
+    .banner { border-radius:12px; padding:12px 14px; margin-bottom:12px; font-size:14px; }
+    .warn { background:var(--warn-bg); color:var(--warn-ink); }
+    .healthy { background:var(--green-soft); }
+    .sick { background:var(--sick-bg); color:var(--sick); }
+    .stage-kicker { margin:0; font-size:13px; font-weight:700; }
+    .stage-value { margin:4px 0 0; font-family:Georgia,serif; font-size:32px; }
+    dl { margin:14px 0 0; }
+    dt { font-weight:700; }
+    dd { margin:0 0 10px; color:var(--muted); }
+    .bar { display:grid; grid-template-columns:9rem 1fr 2.5rem; gap:8px; align-items:center; font-size:14px; margin-top:6px; }
+    .track { height:8px; background:#ece7db; border-radius:99px; overflow:hidden; }
+    .fill { display:block; height:100%; background:var(--green); }
+    .error { background:var(--sick-bg); color:var(--sick); border-radius:12px; padding:12px; }
+    .header-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .nav-links { display:flex; gap:10px; align-items:center; }
+    .nav-links a { color:var(--ink); font-weight:700; font-size:14px; text-decoration:none; background:rgba(255,253,248,.9); border:1px solid var(--line); border-radius:999px; padding:6px 12px; }
+    a.ghost { display:inline-block; background:white; border:1px solid var(--line); border-radius:10px; padding:10px 16px; color:inherit; text-decoration:none; font:inherit; }
+    a.ghost[hidden] { display:none; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr; } header { align-items:start; flex-direction:column; gap:8px; } .header-actions { flex-wrap:wrap; } }
+  </style>
+<style id="field-bg">body{background:#c9d7b8 url("/field-bg.jpg") center 30% / cover no-repeat !important;}</style></head>
+<body>
+  <header>
+    <div><p class="eyebrow">Paddy Doctor</p><p>Rice leaf classifier</p></div>
+    <div class="header-actions">
+      <nav class="nav-links"><a href="/help">Help</a><a href="/about">About</a></nav>
+      <button class="ghost" id="logout" type="button">Log out</button>
+    </div>
+  </header>
+  <main>
+    <h1>Name the disease on a rice leaf.</h1>
+    <p class="lead">Upload a close-up. The model first decides healthy or unhealthy, then names the disease if the leaf is sick.</p>
+    <div class="grid">
+      <section class="card">
+        <h2>Leaf photo</h2>
+        <button class="drop" id="drop" type="button"><span>Drop a close-up here<br><span class="hint">One to three rice leaves, lesions in frame, even daylight. JPEG or PNG.</span></span></button>
+        <input id="file" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+        <div class="row">
+          <button class="ghost" id="choose" type="button">Choose photo</button>
+          <button class="primary" id="go" type="button" disabled>Classify</button>
+        </div>
+        <p class="hint">Wide field shots, sky, and golden ripe panicles are outside the training photos. A healthy call means a green leaf with no spots.</p>
+      </section>
+      <section class="card">
+        <h2>Diagnosis</h2>
+        <div id="out"><p class="hint">The result appears here after you classify a photo. Stage A says healthy or unhealthy. Stage B names the disease only when the leaf is unhealthy.</p></div>
+      </section>
+    </div>
+    <p class="foot">Decision support for scouting. It does not replace a plant pathologist.</p>
+  </main>
+  <script>
+    const fileInput = document.getElementById("file");
+    const drop = document.getElementById("drop");
+    const go = document.getElementById("go");
+    const out = document.getElementById("out");
+    const LOGIN_KEY = "paddy-doctor-login";
+    let file = null;
+    function readLogin() {
+      try { return JSON.parse(localStorage.getItem(LOGIN_KEY) || "null"); }
+      catch { return null; }
+    }
+    if (!readLogin()) location.replace("/");
+    document.getElementById("logout").onclick = () => {
+      localStorage.removeItem(LOGIN_KEY);
+      location.href = "/";
+    };
+    function pct(v){ return Math.round(v * 100) + "%"; }
+    function bars(rows){ return rows.slice(0,5).map(row => `<div class="bar"><span>${row.title}</span><span class="track"><span class="fill" style="width:${Math.max(row.probability*100,2)}%"></span></span><span>${pct(row.probability)}</span></div>`).join(""); }
+    function choose(next){ if(!next) return; file = next; go.disabled = false; drop.innerHTML = `<img alt="Selected leaf" src="${URL.createObjectURL(next)}">`; out.innerHTML = `<p class="hint">Photo ready. Click Classify.</p>`; }
+    document.getElementById("choose").onclick = () => fileInput.click();
+    drop.onclick = () => fileInput.click();
+    drop.ondragover = (e) => e.preventDefault();
+    drop.ondrop = (e) => { e.preventDefault(); choose(e.dataTransfer.files[0]); };
+    fileInput.onchange = () => choose(fileInput.files[0]);
+    go.onclick = async () => {
+      if (!readLogin()) {
+        location.href = "/";
+        return;
+      }
+      if (!file) return;
+      go.disabled = true; go.textContent = "Reading the leaf…";
+      out.innerHTML = "<p>Comparing the leaf with the ten Paddy Doctor classes…</p>";
+      const body = new FormData(); body.append("file", file);
+      try {
+        const response = await fetch("/api/classify", { method: "POST", body });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(typeof payload.detail === "string" ? payload.detail : "The classifier could not read that photo.");
+        const stage = payload.two_stage, healthy = stage.health === "healthy", check = payload.input_check, disease = stage.disease;
+        out.innerHTML = `${check.typical_leaf_photo ? "" : `<div class="banner warn"><strong>This does not look like a training close-up.</strong><p>${check.reasons.join(" ")}</p><p>${check.guidance}</p></div>`}
+          ${healthy ? `<div class="banner healthy"><p class="stage-kicker">Stage A · Healthy leaf</p><p class="stage-value">${pct(stage.p_healthy)} healthy</p></div><dl><dt>Cause</dt><dd>${payload.cause}</dd><dt>What to look for</dt><dd>${payload.signs}</dd><dt>Suggested next step</dt><dd>${payload.action}</dd></dl><p><strong>Class scores</strong></p>${bars(payload.ranking)}`
+          : `<div class="banner sick"><p class="stage-kicker">Stage A · Unhealthy</p><p class="stage-value">${pct(stage.p_unhealthy)} unhealthy</p></div>${disease ? `<p class="stage-kicker" style="color:var(--green)">Stage B · ${disease.title}</p><p class="hint">Among diseases: ${pct(disease.probability)}</p><dl><dt>Cause</dt><dd>${disease.cause}</dd><dt>What to look for</dt><dd>${disease.signs}</dd><dt>Suggested next step</dt><dd>${disease.action}</dd></dl><p><strong>Disease scores</strong></p>${bars(disease.ranking)}` : ""}`}`;
+      } catch (err) { out.innerHTML = `<div class="error">${err.message}</div>`; }
+      finally { go.disabled = false; go.textContent = "Classify"; }
+    };
+  </script>
+</body>
+</html>

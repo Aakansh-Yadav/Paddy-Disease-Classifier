@@ -9,12 +9,20 @@ from pathlib import Path
 
 import pandas as pd
 from PIL import Image
-from sklearn.metrics import accuracy_score, classification_report, f1_score
 
-from src.config import CLASSES, COMPARISON_PATH, MODELS_DIR, MODEL_REGISTRY, REPORTS_DIR
+from src.config import (
+    CLASSES,
+    COMPARISON_PATH,
+    MODELS_DIR,
+    MODEL_REGISTRY,
+    REPORTS_DIR,
+    SEED,
+)
 from src.dataset import load_metadata, stratified_split
 from src.evaluate import save_confusion_matrix, save_predictions
+from src.metrics import classification_scores, headline_from_metrics, payload_from_scores
 from src.predict import ranking_from_scores
+from src.seed import set_seed
 from src.yolo_data import export_classify_folder
 
 
@@ -50,18 +58,14 @@ def evaluate_yolo(model, val_df: pd.DataFrame) -> tuple[dict, list[int], list[in
                 "correct": pred_name == true_name,
             }
         )
-    report = classification_report(
-        y_true,
-        y_pred,
-        labels=list(range(len(CLASSES))),
-        target_names=CLASSES,
-        output_dict=True,
-        zero_division=0,
-    )
+    scores = classification_scores(y_true, y_pred)
     metrics = {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
-        "per_class": report,
+        "accuracy": scores["accuracy"],
+        "macro_f1": scores["f1_macro"],
+        "precision_macro": scores["precision_macro"],
+        "recall_macro": scores["recall_macro"],
+        "per_class": scores["per_class"],
+        **payload_from_scores(scores),
     }
     return metrics, y_true, y_pred, records
 
@@ -73,12 +77,15 @@ def write_comparison() -> None:
         if not path.exists():
             continue
         payload = json.loads(path.read_text())
+        headline = headline_from_metrics(payload)
         rows.append(
             {
                 "model": key,
                 "title": spec["title"],
-                "val_accuracy": payload.get("val_accuracy"),
-                "val_macro_f1": payload.get("val_macro_f1"),
+                "accuracy": headline["accuracy"],
+                "precision_macro": headline["precision"],
+                "recall_macro": headline["recall"],
+                "f1_macro": headline["f1"],
                 "n_train": payload.get("n_train"),
                 "n_val": payload.get("n_val"),
                 "val_errors": payload.get("val_errors"),
@@ -93,9 +100,11 @@ def train_yolo(
     epochs: int = 12,
     imgsz: int = 224,
     batch: int = 16,
+    seed: int = SEED,
 ) -> dict:
     from ultralytics import YOLO
 
+    set_seed(seed)
     spec = MODEL_REGISTRY[model_key]
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     data_dir = export_classify_folder()
@@ -114,6 +123,8 @@ def train_yolo(
         patience=8,
         verbose=True,
         workers=2,
+        seed=seed,
+        deterministic=True,
     )
     best = MODELS_DIR / model_key.replace("-", "_") / "weights" / "best.pt"
     dest = Path(spec["checkpoint"])
@@ -127,6 +138,8 @@ def train_yolo(
     payload = {
         "model": model_key,
         "val_accuracy": metrics["accuracy"],
+        "val_precision": metrics["precision_macro"],
+        "val_recall": metrics["recall_macro"],
         "val_macro_f1": metrics["macro_f1"],
         "n_train": int(sum(1 for _ in (data_dir / "train").rglob("*.jpg"))),
         "n_val": int(len(val_df)),
@@ -134,12 +147,15 @@ def train_yolo(
         "classification_report": metrics["per_class"],
         "val_errors": int(sum(1 for row in records if not row["correct"])),
         "checkpoint": str(dest),
+        "seed": seed,
     }
     Path(spec["metrics"]).write_text(json.dumps(payload, indent=2))
     write_comparison()
     print(f"Saved YOLO checkpoint to {dest}")
     print(
         f"Val accuracy {payload['val_accuracy']:.3f}  "
+        f"precision {payload.get('val_precision', 0):.3f}  "
+        f"recall {payload.get('val_recall', 0):.3f}  "
         f"macro F1 {payload['val_macro_f1']:.3f}"
     )
     return payload
@@ -155,8 +171,15 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--imgsz", type=int, default=224)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--seed", type=int, default=SEED)
     args = parser.parse_args()
-    train_yolo(args.model, epochs=args.epochs, imgsz=args.imgsz, batch=args.batch)
+    train_yolo(
+        args.model,
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":

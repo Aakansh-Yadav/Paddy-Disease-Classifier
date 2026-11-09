@@ -110,6 +110,7 @@ YOLO_DATA_DIR = ROOT / "data" / "yolo_cls"
 METRICS_PATH = REPORTS_DIR / "metrics.json"
 YOLO_METRICS_PATH = REPORTS_DIR / "yolo_metrics.json"
 COMPARISON_PATH = REPORTS_DIR / "model_comparison.json"
+CV_METRICS_PATH = REPORTS_DIR / "cv_metrics.json"
 CM_PATH = REPORTS_DIR / "confusion_matrix.png"
 YOLO_CM_PATH = REPORTS_DIR / "yolo_confusion_matrix.png"
 HISTORY_PATH = REPORTS_DIR / "training_history.png"
@@ -119,6 +120,9 @@ ERRORS_PATH = REPORTS_DIR / "val_predictions.csv"
 YOLO_ERRORS_PATH = REPORTS_DIR / "yolo_val_predictions.csv"
 
 SUBSET_PER_CLASS = 80
+HEALTHY_LABEL = "normal"
+UNHEALTHY_CLASSES = [name for name in CLASSES if name != HEALTHY_LABEL]
+HEALTHY_THRESHOLD = 0.5
 
 MODEL_REGISTRY = {
     "mobilenet_v3_small": {

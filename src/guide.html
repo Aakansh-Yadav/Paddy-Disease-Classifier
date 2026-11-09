@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Help and About · Paddy Doctor</title>
+  <style>
+    :root { --ink:#1c2b24; --muted:#5c6b62; --green:#1f6b45; --card:#fffdf8; --line:#ddd6c6; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; color:var(--ink); font-family:"Segoe UI",sans-serif; background:#c9d7b8 url("/field-bg.jpg") center 30% / cover no-repeat; }
+    header, main { width:min(860px,calc(100% - 32px)); margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:end; gap:16px; padding:28px 0 8px; flex-wrap:wrap; }
+    .eyebrow { letter-spacing:.16em; text-transform:uppercase; color:var(--green); font-size:12px; font-weight:700; margin:0; }
+    nav { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    nav a, .page-links a { color:var(--ink); font-weight:700; font-size:14px; text-decoration:none; background:rgba(255,253,248,.9); border:1px solid var(--line); border-radius:999px; padding:6px 12px; }
+    h1, h2 { font-family:Georgia,serif; font-weight:500; }
+    h1 { font-size:clamp(32px,5vw,48px); line-height:1.1; margin:18px 0 8px; text-shadow:0 0 10px rgba(246,243,234,.95); }
+    .lead { max-width:640px; color:var(--ink); font-size:18px; text-shadow:0 0 10px rgba(246,243,234,.95); }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; margin:18px 0; }
+    h2 { margin:0 0 12px; font-size:28px; }
+    p, li { color:var(--muted); line-height:1.5; }
+    ol { margin:0; padding-left:1.2rem; }
+    li { margin:0 0 8px; }
+    .names { margin:0; padding-left:1.2rem; }
+    section[hidden] { display:none; }
+    @media (max-width:800px) { header { align-items:start; flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Paddy Doctor</p>
+      <p style="margin:4px 0 0">Rice leaf classifier</p>
+    </div>
+    <nav>
+      <a href="/">Log in</a>
+      <a href="/classify" id="to-classify" hidden>Classifier</a>
+      <a href="/about">About</a>
+      <a href="/help">Help</a>
+    </nav>
+  </header>
+  <main>
+    <h1 id="page-title">About</h1>
+    <p class="lead" id="page-lead">What this tool is for.</p>
+    <section class="card" id="about">
+      <h2>About</h2>
+      <p>Paddy Doctor looks at a close-up photograph of a rice leaf and says whether it looks healthy or which problem it most resembles. It is decision support for field scouting. It does not replace a plant pathologist.</p>
+      <p>The check has two stages. Stage A decides healthy or unhealthy. Stage B names the disease only when the leaf looks unhealthy.</p>
+      <p>The ten labels are:</p>
+      <ul class="names">
+        <li>Healthy leaf</li>
+        <li>Bacterial leaf blight</li>
+        <li>Bacterial leaf streak</li>
+        <li>Bacterial panicle blight</li>
+        <li>Rice blast</li>
+        <li>Brown spot</li>
+        <li>Dead heart</li>
+        <li>Downy mildew</li>
+        <li>Rice hispa</li>
+        <li>Rice tungro</li>
+      </ul>
+      <p>The photos it learned from are close-ups in the Paddy Doctor rice-leaf collection. A wide view of a field is outside that set.</p>
+    </section>
+    <section class="card" id="help">
+      <h2>Help</h2>
+      <ol>
+        <li>On the first page, enter a username and a 10-digit mobile number. Email is optional. Continue opens the classifier.</li>
+        <li>Choose or drop a JPEG or PNG close-up. One to three rice leaves, with any spots in the frame, in even daylight, works best.</li>
+        <li>Click Classify. The diagnosis shows Stage A first. If the leaf looks unhealthy, Stage B names the closest disease and lists what to look for.</li>
+        <li>A warning means the photo does not look like a training close-up. Wide field shots, sky, and golden ripe panicles are poor matches. A healthy call means a green leaf with no spots.</li>
+        <li>Photos larger than 12 MB are rejected. Log out on the classifier to return to the login page.</li>
+      </ol>
+    </section>
+  </main>
+  <script>
+    const session = localStorage.getItem("paddy-doctor-login");
+    if (session) document.getElementById("to-classify").hidden = false;
+    const helpPage = location.pathname === "/help";
+    document.getElementById(helpPage ? "about" : "help").hidden = true;
+    document.title = helpPage ? "Help · Paddy Doctor" : "About · Paddy Doctor";
+    document.getElementById("page-title").textContent = helpPage ? "Help" : "About";
+    document.getElementById("page-lead").textContent = helpPage
+      ? "How to sign in and read a leaf photo."
+      : "What this tool is for.";
+  </script>
+</body>
+</html>

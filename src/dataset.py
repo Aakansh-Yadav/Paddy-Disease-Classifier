@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import torch
 from PIL import Image
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
@@ -21,6 +22,7 @@ from src.config import (
     TRAIN_IMAGES,
     VAL_FRACTION,
 )
+from src.seed import torch_generator, worker_init_fn
 
 
 def image_transforms(train: bool) -> transforms.Compose:
@@ -108,40 +110,46 @@ def stratified_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return train_df.reset_index(drop=True), val_df.reset_index(drop=True)
 
 
-def _weighted_sampler(frame: pd.DataFrame) -> WeightedRandomSampler:
+def _weighted_sampler(frame: pd.DataFrame, seed: int = SEED) -> WeightedRandomSampler:
     counts = frame["label"].value_counts().to_dict()
     weights = frame["label"].map(lambda y: 1.0 / counts[y]).to_numpy().copy()
     return WeightedRandomSampler(
-        weights=weights, num_samples=len(frame), replacement=True
+        weights=torch.as_tensor(weights, dtype=torch.double),
+        num_samples=len(frame),
+        replacement=True,
+        generator=torch_generator(seed),
     )
 
 
 def create_dataloaders(
     batch_size: int = BATCH_SIZE,
+    seed: int = SEED,
 ) -> tuple[DataLoader, DataLoader, pd.DataFrame, pd.DataFrame]:
     df = load_metadata()
     train_df, val_df = stratified_split(df)
     train_ds = PaddyImageDataset(train_df, train=True)
     val_ds = PaddyImageDataset(val_df, train=False)
-    pin = False
-    try:
-        import torch
-
-        pin = torch.cuda.is_available()
-    except Exception:
-        pin = False
+    pin = torch.cuda.is_available()
+    worker_kwargs = {}
+    if NUM_WORKERS > 0:
+        worker_kwargs = {
+            "num_workers": NUM_WORKERS,
+            "worker_init_fn": worker_init_fn,
+            "persistent_workers": False,
+        }
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
-        sampler=_weighted_sampler(train_df),
-        num_workers=NUM_WORKERS,
+        sampler=_weighted_sampler(train_df, seed=seed),
         pin_memory=pin,
+        generator=torch_generator(seed),
+        **worker_kwargs,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=NUM_WORKERS,
         pin_memory=pin,
+        **worker_kwargs,
     )
     return train_loader, val_loader, train_df, val_df
